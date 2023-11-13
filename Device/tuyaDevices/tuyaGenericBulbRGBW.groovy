@@ -20,9 +20,9 @@ metadata {
 		capability "ColorTemperature"
 		// capability "ColorControl"
 		// capability "ColorMode"
-        	capability "FanControl"
+        capability "FanControl"
 		capability "Refresh"
-        	capability "Light"
+        capability "Light"
 		//capability "LevelPreset"
 		capability "SwitchLevel"
 		capability "Switch"
@@ -30,26 +30,26 @@ metadata {
 		//command "status"
 
 		command "SendCustomDataToDevice", [
-	            [name:"endpoint*", type:"NUMBER", description:"To which endpint(dps) do you want the data to be sent"], 
-	            [name:"data*", type:"STRING", description:"the data to be sent, treated as string, but true and false is converted"]
-	        ]
-        
-	        command "SetDeviceValue", [
-	            [name:"endpoint*", type:"ENUM", description:"To which endpint(dps) do you want the data to be sent", constraints: dpsKeys()], 
-	            [name:"data*", type:"STRING", description:"the data to be sent, treated as string, but true and false is converted"]
+			[name:"endpoint*", type:"NUMBER", description:"To which endpint(dps) do you want the data to be sent"], 
+			[name:"data*", type:"STRING", description:"the data to be sent, treated as string, but true and false is converted"]
+		]
+	
+		command "SetDeviceValue", [
+			[name:"endpoint*", type:"ENUM", description:"To which endpint(dps) do you want the data to be sent", constraints: dpsKeys()], 
+			[name:"data*", type:"STRING", description:"the data to be sent, treated as string, but true and false is converted"]
 		]
 	        
-	        command "setSpeed", [
-	            [name: "Fan speed*",type:"NUMBER", description:"Fan speed to set"]
-	        ]
-	        
-	        command "lightOn"
-	            
-	        command "lightOff"
+		command "setSpeed", [
+			[name: "Fan speed*",type:"NUMBER", description:"Fan speed to set"]
+		]
+		
+		command "lightOn"
+			
+		command "lightOff"
 
 		attribute "rawMessage", "String"
-	        attribute "light", "String"
-	        attribute "fanSpeed", "Number"
+		attribute "light", "String"
+		attribute "fanSpeed", "Number"
 	}
 }
 
@@ -61,7 +61,7 @@ preferences {
 		input name: "logEnable", type: "bool", title: "Enable debug logging", defaultValue: true
 		input "tuyaProtVersion", "enum", title: "Select tuya protocol version: ", required: true, options: [31: "3.1", 33 : "3.3"]
 		input name: "poll_interval", type: "enum", title: "Configure poll interval:", options: [0: "No polling", 5: "Every 5 second", 10: "Every 10 second", 15: "Every 15 second", 20: "Every 20 second", 30: "Every 30 second", 60: "Every 1 min", 120: "Every 2 min", 180: "Every 3 min"]
-        	input name: "deviceCategory", type: "enum", title: "Device Category:", options: ['fs': "fs"], required: true
+		input name: "deviceCategory", type: "enum", title: "Device Category:", options: ['fs': "fs"], required: true
 	}
 }
 
@@ -111,24 +111,25 @@ def dpsKeys() {
 def getDpsByCategory() {
 	switch (settings.deviceCategory) {
 		case 'fs':
-			return ['fan_status': 
-                    			[code:'1', type: boolean],
+			return 
+				['fan_status': 
+					[code:'1', type: boolean],
 				'fan_mode': 
-                    			[code: '2', type: String],
+					[code: '2', type: String],
 				'fan_speed': 
-                    			[code: '3', type: Integer],
+					[code: '3', type: Integer],
 				'fan_direction': 
-                    			[code: '8', type: String],
+					[code: '8', type: String],
 				'light_status': 
-                    			[code: '15', type: String],
+					[code: '15', type: String],
 				'brightness': 
-                    			[code: '16', type: Integer],
+					[code: '16', type: Integer],
 				'color_temp': 
-                    			[code: '17', type: Integer],
+					[code: '17', type: Integer],
 				'light_mode': 
-                    			[code: '19', type: String],
+					[code: '19', type: String],
 				'timed_shutdown': 
-                    			[code: '22', type: String]]
+					[code: '22', type: String]]
 		default:
 			return []
 	}
@@ -450,68 +451,68 @@ def parse(String description) {
 	        // light_status (light)
 	        status_code = dpsIds['light_status']?.get('code') ?: 100000
 	        if (status_object.dps.containsKey(status_code)) {
-			if (status_object.dps[status_code] == true) {
-				sendEvent(name: "light", value : "on")
-			} else {
-				sendEvent(name: "light", value : "off")
+				if (status_object.dps[status_code] == true) {
+					sendEvent(name: "light", value : "on")
+				} else {
+					sendEvent(name: "light", value : "off")
+				}
 			}
-		}
 	        
 	        // fan_speed (speed)
 	        status_code = dpsIds['fan_speed']?.get('code') ?: 100000
 	        if (status_object.dps.containsKey(status_code)) {
-			sendEvent(name: "fanSpeed", value : status_object.dps[status_code] as Integer)
-		}
-
-
-		// Bulb Mode
-		if (status_object.dps.containsKey("21")) {
-			if (status_object.dps["21"] == "white") {
-				sendEvent(name: "colorMode", value : "CT")
-			} else if (status_object.dps["21"] == "colour") {
-				sendEvent(name: "colorMode", value : "RGB")
-			} else {
-				sendEvent(name: "colorMode", value : "EFFECTS")
+				sendEvent(name: "fanSpeed", value : status_object.dps[status_code] as Integer)
 			}
-		}
 
-		// Brightness
-		if (status_object.dps.containsKey("22")) {
-			sendEvent(name: "presetLevel", value : status_object.dps["22"]/10)
-			sendEvent(name: "level", value : status_object.dps["22"]/10)
-		}
 
-		// Color temperature
-		if (status_object.dps.containsKey("23")) {
+			// Bulb Mode
+			if (status_object.dps.containsKey("21")) {
+				if (status_object.dps["21"] == "white") {
+					sendEvent(name: "colorMode", value : "CT")
+				} else if (status_object.dps["21"] == "colour") {
+					sendEvent(name: "colorMode", value : "RGB")
+				} else {
+					sendEvent(name: "colorMode", value : "EFFECTS")
+				}
+			}
 
-			Integer colortemperature = (status_object.dps["23"] + (2700/3.8))*3.8
+			// Brightness
+			if (status_object.dps.containsKey("22")) {
+				sendEvent(name: "presetLevel", value : status_object.dps["22"]/10)
+				sendEvent(name: "level", value : status_object.dps["22"]/10)
+			}
 
-			sendEvent(name: "colorTemperature", value : colortemperature)
-		}
+			// Color temperature
+			if (status_object.dps.containsKey("23")) {
 
-		// Color information
-		if (status_object.dps.containsKey("24")) {
-			// Hue
-			def hueStr = status_object.dps["24"].substring(0,4)
-			Float hue_fl = Integer.parseInt(hueStr, 16)/3.6
-			Integer hue = hue_fl.round(0)
+				Integer colortemperature = (status_object.dps["23"] + (2700/3.8))*3.8
 
-			// Saturation
-			def satStr = status_object.dps["24"].substring(5,8)
-			def sat = Integer.parseInt(satStr, 16)/10
+				sendEvent(name: "colorTemperature", value : colortemperature)
+			}
 
-			// Level
-			def levelStr = status_object.dps["24"].substring(9,12)
-			def level = Integer.parseInt(levelStr, 16)/10
+			// Color information
+			if (status_object.dps.containsKey("24")) {
+				// Hue
+				def hueStr = status_object.dps["24"].substring(0,4)
+				Float hue_fl = Integer.parseInt(hueStr, 16)/3.6
+				Integer hue = hue_fl.round(0)
 
-			// Bug in Hubitat: Hubitat stores colors as HSV, however documents claim HSL. The tuya
-			// Ledvance bulb I have store color information in HSL, hence need to convert.
-			def colormap = hslToHsv(hue, sat, level)
+				// Saturation
+				def satStr = status_object.dps["24"].substring(5,8)
+				def sat = Integer.parseInt(satStr, 16)/10
 
-			sendEvent(name: "hue", value : colormap.hue)
-			sendEvent(name: "saturation", value : colormap.saturation)
-			sendEvent(name: "level", value : colormap.value)
-		}
+				// Level
+				def levelStr = status_object.dps["24"].substring(9,12)
+				def level = Integer.parseInt(levelStr, 16)/10
+
+				// Bug in Hubitat: Hubitat stores colors as HSV, however documents claim HSL. The tuya
+				// Ledvance bulb I have store color information in HSL, hence need to convert.
+				def colormap = hslToHsv(hue, sat, level)
+
+				sendEvent(name: "hue", value : colormap.hue)
+				sendEvent(name: "saturation", value : colormap.saturation)
+				sendEvent(name: "level", value : colormap.value)
+			}
 
 		sendEvent(name: "rawMessage", value: status_object.dps)
 
