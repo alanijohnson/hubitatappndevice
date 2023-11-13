@@ -14,20 +14,30 @@
  * limitations under the License.
  */
 metadata {
-	definition(name: "tuya Generic RGBW Bulb", namespace: "iholand", author: "iholand") {
+	definition(name: "Local Tuya", namespace: "iholand", author: "iholand") {
 		capability "Actuator"
 		capability "Bulb"
 		capability "ColorTemperature"
 		capability "ColorControl"
 		capability "ColorMode"
+        	capability "FanControl"
 		capability "Refresh"
+        	capability "Light"
 		capability "LevelPreset"
 		capability "SwitchLevel"
 		capability "Switch"
 
 		command "status"
 
-		command "SendCustomDataToDevice", [[name:"endpoint*", type:"NUMBER", description:"To which endpint(dps) do you want the data to be sent"], [name:"data*", type:"STRING", description:"the data to be sent, treated as string, but true and false is converted"]]
+		command "SendCustomDataToDevice", [
+	            [name:"endpoint*", type:"NUMBER", description:"To which endpint(dps) do you want the data to be sent"], 
+	            [name:"data*", type:"STRING", description:"the data to be sent, treated as string, but true and false is converted"]
+	        ]
+        
+	        command "SetDeviceValue", [
+	            [name:"endpoint*", type:"ENUM", description:"To which endpint(dps) do you want the data to be sent", constraints: dpsKeys()], 
+	            [name:"data*", type:"STRING", description:"the data to be sent, treated as string, but true and false is converted"]
+	        ]
 
 		attribute "rawMessage", "String"
 	}
@@ -41,6 +51,7 @@ preferences {
 		input name: "logEnable", type: "bool", title: "Enable debug logging", defaultValue: true
 		input "tuyaProtVersion", "enum", title: "Select tuya protocol version: ", required: true, options: [31: "3.1", 33 : "3.3"]
 		input name: "poll_interval", type: "enum", title: "Configure poll interval:", options: [0: "No polling", 5: "Every 5 second", 10: "Every 10 second", 15: "Every 15 second", 20: "Every 20 second", 30: "Every 30 second", 60: "Every 1 min", 120: "Every 2 min", 180: "Every 3 min"]
+        	input name: "deviceCategory", type: "enum", title: "Device Category:", options: ['fs': "fs"]
 	}
 }
 
@@ -77,6 +88,37 @@ def updated() {
 	}
 
 	sendEvent(name: "switch", value: "off")
+}
+
+def dpsKeys() {
+    return ['fan_status', 'fan_mode', 'fan_speed', 'fan_direction', 'light_status', 'brightness','color_temp','light_mode','timed_shutdown','other']   
+}
+
+def getDpsByCategory() {
+	switch (settings.deviceCategory) {
+		case 'fs':
+			return ['fan_status': 
+					[code:'1', type: boolean],
+				'fan_mode': 
+					[code: '2', type: String],
+				'fan_speed': 
+					[code: '3', type: Integer],
+				'fan_direction': 
+					[code: '8', type: String],
+				'light_status': 
+					[code: '15', type: String],
+				'brightness': 
+					[code: '16', type: Integer],
+				'color_temp': 
+					[code: '17', type: Integer],
+				'light_mode': 
+					[code: '19', type: String],
+				'timed_shutdown': 
+					[code: '22', type: String]
+			       ]
+		default:
+			return []
+	}
 }
 
 
@@ -209,9 +251,22 @@ def SendCustomDataToDevice(endpoint, data) {
 		data = true
 	} else if (data == "false") {
 		data = false
-	}
-
+    	} 
 	send(generate_payload("set", ["${endpoint}":data]))
+}
+
+def SetDeviceValue(endpoint, data) {
+    def dpids = getDpsByCategory()
+    
+    if (dpids.containsKey(endpoint)) {
+        if (dpids.get(endpoint)['type'] == Integer) {
+            log.debug "Casting data as Integer"
+            data = data as Integer
+        }
+        SendCustomDataToDevice(dpids.get(endpoint)['code'], data)
+    } else {
+        log.error "${settings.deviceCategory} doesn't have an associated dpid for ${endpoint}"   
+    }
 }
 
 def sendSetMessage() {
@@ -221,8 +276,7 @@ def sendSetMessage() {
 }
 
 def parse(String description) {
-	if (logEnable) log.debug "Receiving message from device"
-	if (logEnable) log.debug(description)
+    if (logEnable) log.debug "Receiving message from device: ${description}"
 
 	byte[] msg_byte = hubitat.helper.HexUtils.hexStringToByteArray(description)
 
@@ -327,6 +381,17 @@ def parse(String description) {
 
 	if (status != Null && status != "") {
 		def status_object = jsonSlurper.parseText(status)
+        def dpsIds = getDpsByCategory()
+        
+	        // fan_status
+	        def fan_status = dpsIds['fan_status']['code']
+	        if (status_object.dps.containsKey(fan_status)) {
+			if (status_object.dps[fan_status] == true) {
+				sendEvent(name: "switch", value : "on")
+			} else {
+				sendEvent(name: "switch", value : "off")
+			}
+		}
 
 		// Switch status (on / off)
 		if (status_object.dps.containsKey("20")) {
@@ -390,7 +455,7 @@ def parse(String description) {
 
 	} else {
 		// Message did not contain data, bulb received unknown command?
-		log.debug "Bulb did not understand command"
+		log.warn "Device did not understand command. Incoming message was empty"
 	}
 
 	try {
