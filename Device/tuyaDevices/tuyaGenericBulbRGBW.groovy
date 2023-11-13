@@ -18,16 +18,16 @@ metadata {
 		capability "Actuator"
 		capability "Bulb"
 		capability "ColorTemperature"
-		capability "ColorControl"
-		capability "ColorMode"
+		// capability "ColorControl"
+		// capability "ColorMode"
         	capability "FanControl"
 		capability "Refresh"
         	capability "Light"
-		capability "LevelPreset"
+		//capability "LevelPreset"
 		capability "SwitchLevel"
 		capability "Switch"
 
-		command "status"
+		//command "status"
 
 		command "SendCustomDataToDevice", [
 	            [name:"endpoint*", type:"NUMBER", description:"To which endpint(dps) do you want the data to be sent"], 
@@ -37,9 +37,19 @@ metadata {
 	        command "SetDeviceValue", [
 	            [name:"endpoint*", type:"ENUM", description:"To which endpint(dps) do you want the data to be sent", constraints: dpsKeys()], 
 	            [name:"data*", type:"STRING", description:"the data to be sent, treated as string, but true and false is converted"]
+		]
+	        
+	        command "setSpeed", [
+	            [name: "Fan speed*",type:"NUMBER", description:"Fan speed to set"]
 	        ]
+	        
+	        command "lightOn"
+	            
+	        command "lightOff"
 
 		attribute "rawMessage", "String"
+	        attribute "light", "String"
+	        attribute "fanSpeed", "Number"
 	}
 }
 
@@ -51,8 +61,12 @@ preferences {
 		input name: "logEnable", type: "bool", title: "Enable debug logging", defaultValue: true
 		input "tuyaProtVersion", "enum", title: "Select tuya protocol version: ", required: true, options: [31: "3.1", 33 : "3.3"]
 		input name: "poll_interval", type: "enum", title: "Configure poll interval:", options: [0: "No polling", 5: "Every 5 second", 10: "Every 10 second", 15: "Every 15 second", 20: "Every 20 second", 30: "Every 30 second", 60: "Every 1 min", 120: "Every 2 min", 180: "Every 3 min"]
-        	input name: "deviceCategory", type: "enum", title: "Device Category:", options: ['fs': "fs"]
+        	input name: "deviceCategory", type: "enum", title: "Device Category:", options: ['fs': "fs"], required: true
 	}
+}
+
+def fanLevels() {
+    return ['1','2','3','4','5','6']
 }
 
 def logsOff() {
@@ -98,24 +112,23 @@ def getDpsByCategory() {
 	switch (settings.deviceCategory) {
 		case 'fs':
 			return ['fan_status': 
-					[code:'1', type: boolean],
+                    			[code:'1', type: boolean],
 				'fan_mode': 
-					[code: '2', type: String],
+                    			[code: '2', type: String],
 				'fan_speed': 
-					[code: '3', type: Integer],
+                    			[code: '3', type: Integer],
 				'fan_direction': 
-					[code: '8', type: String],
+                    			[code: '8', type: String],
 				'light_status': 
-					[code: '15', type: String],
+                    			[code: '15', type: String],
 				'brightness': 
-					[code: '16', type: Integer],
+                    			[code: '16', type: Integer],
 				'color_temp': 
-					[code: '17', type: Integer],
+                    			[code: '17', type: Integer],
 				'light_mode': 
-					[code: '19', type: String],
+                    			[code: '19', type: String],
 				'timed_shutdown': 
-					[code: '22', type: String]
-			       ]
+                    			[code: '22', type: String]]
 		default:
 			return []
 	}
@@ -231,16 +244,53 @@ def refresh() {
 }
 
 def on() {
-	//send(generate_payload("set", [20:true]))
-
-	state.payload[20] = true
-	runInMillis(250, 'sendSetMessage')
+    switch (settings.deviceCategory) {
+        case 'fs':
+            def id = getDpsByCategory()['fan_status']['code']
+            state.payload[id] = true
+            log.debug "state payload: ${state}"
+            runInMillis(250, 'sendSetMessage') 
+    }
 }
 
 def off() {
-	//send(generate_payload("set", [20:false]))
-	state.payload[20] = false
-	runInMillis(250, 'sendSetMessage')
+	switch (settings.deviceCategory) {
+        case 'fs':
+            def id = getDpsByCategory()['fan_status']['code']
+            state.payload[id] = false
+            log.debug "state payload: ${state}"
+            runInMillis(250, 'sendSetMessage') 
+    }
+}
+
+def lightOn() {
+    switch (settings.deviceCategory) {
+        case 'fs':
+            def id = getDpsByCategory()['light_status']['code']
+            state.payload[id] = true
+            log.debug "state payload: ${state}"
+            runInMillis(250, 'sendSetMessage') 
+    }
+}
+
+def lightOff() {
+	switch (settings.deviceCategory) {
+        case 'fs':
+            def id = getDpsByCategory()['light_status']['code']
+            state.payload[id] = false
+            log.debug "state payload: ${state}"
+            runInMillis(250, 'sendSetMessage') 
+    }
+}
+
+def setSpeed(fanSpeed) {
+    switch (settings.deviceCategory) {
+        case 'fs':
+            def id = getDpsByCategory()['fan_speed']['code']
+            state.payload[id] = fanSpeed
+            log.debug "state payload: ${state}"
+            runInMillis(250, 'sendSetMessage') 
+    }
 }
 
 def SendCustomDataToDevice(endpoint, data) {
@@ -251,7 +301,10 @@ def SendCustomDataToDevice(endpoint, data) {
 		data = true
 	} else if (data == "false") {
 		data = false
-    	} 
+    } else if (data == "1") {
+        data = 1   
+    }
+
 	send(generate_payload("set", ["${endpoint}":data]))
 }
 
@@ -269,8 +322,8 @@ def SetDeviceValue(endpoint, data) {
     }
 }
 
+// TODO: why is this executing like this? Why not pass in a value? Is this giving time for a bunch of items to be scheduled
 def sendSetMessage() {
-
 	send(generate_payload("set", state.payload))
 	state.payload = [:]
 }
@@ -381,26 +434,35 @@ def parse(String description) {
 
 	if (status != Null && status != "") {
 		def status_object = jsonSlurper.parseText(status)
-        def dpsIds = getDpsByCategory()
-        
-	        // fan_status
-	        def fan_status = dpsIds['fan_status']['code']
-	        if (status_object.dps.containsKey(fan_status)) {
-			if (status_object.dps[fan_status] == true) {
+	        def dpsIds = getDpsByCategory()
+	        def status_code = null
+	        
+	        // fan_status (switch)
+	        status_code = dpsIds['fan_status']?.get('code') ?: 100000
+	        if (status_object.dps.containsKey(status_code)) {
+			if (status_object.dps[status_code] == true) {
 				sendEvent(name: "switch", value : "on")
 			} else {
 				sendEvent(name: "switch", value : "off")
 			}
+		}
+	        
+	        // light_status (light)
+	        status_code = dpsIds['light_status']?.get('code') ?: 100000
+	        if (status_object.dps.containsKey(status_code)) {
+			if (status_object.dps[status_code] == true) {
+				sendEvent(name: "light", value : "on")
+			} else {
+				sendEvent(name: "light", value : "off")
+			}
+		}
+	        
+	        // fan_speed (speed)
+	        status_code = dpsIds['fan_speed']?.get('code') ?: 100000
+	        if (status_object.dps.containsKey(status_code)) {
+			sendEvent(name: "fanSpeed", value : status_object.dps[status_code] as Integer)
 		}
 
-		// Switch status (on / off)
-		if (status_object.dps.containsKey("20")) {
-			if (status_object.dps["20"] == true) {
-				sendEvent(name: "switch", value : "on")
-			} else {
-				sendEvent(name: "switch", value : "off")
-			}
-		}
 
 		// Bulb Mode
 		if (status_object.dps.containsKey("21")) {
