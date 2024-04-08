@@ -257,6 +257,8 @@ metadata {
 		attribute "assocDNI3", "string"
 		attribute "assocDNI4", "string"
 		attribute "syncStatus", "string"
+        attribute "virtualOff", "string"
+        attribute "levelWhenOn", "string"
 
 		fingerprint mfr:"027A", prod:"B112", deviceId:"1F1C", inClusters:"0x5E,0x26,0x70,0x85,0x8E,0x59,0x55,0x86,0x72,0x5A,0x73,0x5B,0x9F,0x6C,0x7A" //Zooz ZEN22 Dimmer
 		fingerprint mfr:"027A", prod:"B112", deviceId:"261C", inClusters:"0x5E,0x26,0x70,0x85,0x8E,0x59,0x55,0x86,0x72,0x5A,0x73,0x5B,0x9F,0x6C,0x7A" //Zooz ZEN24 Dimmer
@@ -306,6 +308,10 @@ metadata {
 		//Logging options similar to other Hubitat drivers
 		input "txtEnable", "bool", title: fmtTitle("Enable Description Text Logging?"), defaultValue: true
 		input "debugEnable", "bool", title: fmtTitle("Enable Debug Logging?"), defaultValue: true
+        
+        input "virtualOffEnabled", "bool", title: fmtTitle("use virtual off?"), defaultValue: false
+        input "levelChangeBlocksOnOff", "bool", title: fmtTitle("prevent level on/off?"), defaultValue: false
+  
 	}
 }
 
@@ -482,7 +488,7 @@ void debugShowVars() {
 		options: [0:"Report Each Brightness Level", 1:"Report Only Final Brightness Level"],
 	],
 	//threeWaySwitchType - ZEN21/22/23/24/71/72 Only
-	threeWaySwitchType: [num: null, // (19)
+	threeWaySwitchType: [num: 19, // (19)
 		title: "3-Way Switch Type",
 		size: 1, defaultVal: 0,
 		options: [0:"Toggle On/Off Switch", 1:"Toggle On/Off with 2x/3x Shortcuts", 2:"Momentary Switch", 3:"Momentary with 2x/Hold Shortcuts"],
@@ -599,7 +605,9 @@ void updated() {
 	logDebug "Description logging is: ${txtEnable == true}"
 
 	if (debugEnable) runIn(1800, debugLogsOff)
+    if (!virtualOffEnabled) sendEvent(name: "virtualOff", value : "-1")
 
+    
 	runIn(1, executeConfigureCmds)
 }
 
@@ -627,6 +635,25 @@ String off() {
 
 String setLevel(Number level, Number duration=null) {
 	logDebug "setLevel($level, $duration)..."
+    if (levelChangeBlocksOnOff && device.currentValue('switch') == "off") {
+        logDebug "light off"
+        return
+    }
+    logDebug "maximumBrightness: ${settings.configParam11}"
+    logDebug "maximumBrightness: ${settings.configParam10}"
+    max = settings.configParam11.toInteger()
+    min = settings.configParam10.toInteger()
+    if (levelChangeBlocksOnOff && level > max) {
+        logDebug "brightness above max. Setting brightness to min"
+        return getSetLevelCmds(max, duration)
+    }
+    
+    if (levelChangeBlocksOnOff && level < min) {
+        logDebug "brightness below min"
+        return getSetLevelCmds(min, duration)
+    }
+    
+    
 	return getSetLevelCmds(level, duration)
 }
 
@@ -764,7 +791,7 @@ void parse(String description) {
 	hubitat.zwave.Command cmd = zwave.parse(description, commandClassVersions)
 
 	if (cmd) {
-		logTrace "parse: ${description} --PARSED-- ${cmd}"
+		logDebug "parse: ${description} --PARSED-- ${cmd}"
 		zwaveEvent(cmd)
 	} else {
 		logWarn "Unable to parse: ${description}"
@@ -888,18 +915,18 @@ void zwaveEvent(hubitat.zwave.commands.associationv2.AssociationReport cmd) {
 }
 
 void zwaveEvent(hubitat.zwave.commands.basicv1.BasicReport cmd, ep=0) {
-	logTrace "${cmd} (ep ${ep})"
+	logDebug "${cmd} (ep ${ep}) - BasicReport"
 	flashStop() //Stop flashing if its running
 	sendSwitchEvents(cmd.value, "physical", ep)
 }
 
 void zwaveEvent(hubitat.zwave.commands.switchbinaryv1.SwitchBinaryReport cmd, ep=0) {
-	logTrace "${cmd} (ep ${ep})"
+	logTrace "${cmd} (ep ${ep}) - SwitchBinaryReport"
 	sendSwitchEvents(cmd.value, "digital", ep)
 }
 
 void zwaveEvent(hubitat.zwave.commands.switchmultilevelv2.SwitchMultilevelReport cmd, ep=0) {
-	logTrace "${cmd} (ep ${ep})"
+	logTrace "${cmd} (ep ${ep}) - SwitchMultilevelReport"
 	sendSwitchEvents(cmd.value, "digital", ep)
 }
 
@@ -1272,6 +1299,7 @@ String getOnOffCmds(val, Integer endPoint=0) {
 String getSetLevelCmds(Number level, Number duration=null, Integer endPoint=0) {
 	Short modelSeries = Math.floor(deviceModelShort/10)
 	Short levelVal = safeToInt(level, 99)
+    originalLevel = level
 	// level 0xFF tells device to use last level, 0x00 is off
 	if (levelVal != 0xFF && levelVal != 0x00) {
 		//Convert level in range of min/max
@@ -1300,8 +1328,24 @@ String getSetLevelCmds(Number level, Number duration=null, Integer endPoint=0) {
 		}
 	}
 
+    if (virtualOffEnabled && originalLevel == 0x00) {
+        levelVal = convertLevel(1, true)
+    } else if (virtualOffEnabled && originalLevel == 0xFF) {
+        def levelWhenOn = device.currentValue("levelWhenOn")
+        logDebug "levelWhenOn ${levelWhenOn}"
+        levelVal = convertLevel(levelWhenOn != null ? levelWhenOn.toInteger() : 0xFF, true)
+    }
+    
+    if (virtualOffEnabled && originalLevel == 0x00 && device.currentValue("virtualOff") == "false") sendEvent(name: "levelWhenOn", value : device.currentValue("level"))
+    
 	logDebug "getSetLevelCmds output [level:${levelVal}, duration:${durationVal}, endPoint:${endPoint}]"
-	return switchMultilevelSetCmd(levelVal, durationVal, endPoint)
+	returnval = switchMultilevelSetCmd(levelVal, durationVal, endPoint)
+    if (virtualOffEnabled && originalLevel == 0x00) {
+        sendEvent(name: "virtualOff", value : "true")
+    } else if (virtualOffEnabled) {
+        sendEvent(name: "virtualOff", value : "false")
+    }
+    return returnval
 }
 
 
@@ -1328,6 +1372,7 @@ void sendSwitchEvents(rawVal, String type, Integer ep=0) {
 	String desc = "switch is turned ${value}" + (type ? " (${type})" : "")
 	sendEventLog(name:"switch", value:value, type:type, desc:desc, ep)
 
+    logDebug "sendSwitchEvents: rawVal: ${rawVal}"
 	if (rawVal) {
 		Integer level = (rawVal == 99 ? 100 : rawVal)
 		level = convertLevel(level, false)
