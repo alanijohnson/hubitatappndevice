@@ -173,6 +173,12 @@ def updatePollInterval() {
     
     currentStatus = device.currentValue("ipError")
     currentPollInterval = device.currentValue("pollInterval").toInteger()
+    if (currentPollInterval == 0) {
+        if(logEnable) log.debug "polling not configured"
+        return
+    }
+    
+    
     currentPollIntervalIndex = polling_options().findIndexOf {it.key== currentPollInterval}
     if (isAttemptExceeded(RETRY_ATTEMPTS) && currentPollIntervalIndex + 1 < polling_options().size()) {
         list = polling_options().collect { key, value -> key }
