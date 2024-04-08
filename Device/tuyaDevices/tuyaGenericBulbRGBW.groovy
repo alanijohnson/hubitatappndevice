@@ -20,6 +20,14 @@
 //      These parameters will be available to all devices as it isn't possible to dynamically fetch enums for commands.
 //        Feel free to comment out any of the items not used by your devices. You can also copy this file multiple times
 //          to make it per device type.
+
+
+import com.hubitat.app.exception.UnknownDeviceTypeException
+import com.hubitat.app.ChildDeviceWrapper
+import com.hubitat.app.DeviceWrapper
+import groovy.json.JsonOutput
+import groovy.json.JsonSlurper
+
 metadata {
 	definition(name: "Local Tuya", namespace: "iholand", author: "iholand") {
 		capability "Actuator"
@@ -216,8 +224,8 @@ def updated() {
 	} else {
 		status()
 	}
-
-	sendEvent(name: "switch", value: "off")
+    
+    createChildDevices()
 }
 
 def dpsKeys() {
@@ -248,6 +256,102 @@ def getDpsByCategory() {
 		default:
 			return []
 	}
+}
+
+def getChildrenByCategory() {
+    switch (settings.deviceCategory) {
+		case 'fs':
+			return [
+                'light': [
+                    driver: 'Generic Component RGBW',
+                    statuses: ['light', 'brightness', 'colorTemp'],
+                    remap: ['light': 'switch'],
+                    functions: [
+                        'on': [endpoint: 'light_status'],
+                        'off': [endpoint: 'light_status'],
+                        'setLevel': [endpoint: 'brightness'],
+                    ]
+                ],
+                'fan': [
+                    driver: 'Generic Component Dimmer',
+                    statuses: ['switch', 'mode', 'fanSpeed', 'fanDirection'],
+                    remap: ['fanSpeed': 'level'],
+                    functions: [
+                        'on': [endpoint: 'fan_status'],
+                        'off': [endpoint: 'fan_status'],
+                        'setLevel': [endpoint: 'fan_speed'],
+                    ]
+                ]
+            ]
+		default:
+			return []
+	}
+}
+
+// child devices
+private boolean createChildDevices() {
+    Map mapping = getChildrenByCategory()
+    log.debug "Tuya category ${settings.deviceCategory} creating devices ${mapping}"
+
+    mapping.each { key, val ->
+        if (logEnable) log.debug "Creating child ${key}: ${val}"
+        createChildDevice(key, val)
+    }
+
+    //if (mapping.devices == null) { return false }
+
+    return true
+}
+
+private ChildDeviceWrapper createChildDevice(String suffix, Map mapping) {
+    String dni = "${device.getDeviceNetworkId()}-${suffix}"
+    ChildDeviceWrapper dw = getChildDevice(dni)
+    if (logEnable) log.info "Device for DNI ${dni}: ${dw}"
+    if (dw == null) {
+        if (logEnable) log.info "Creating device ${device} ${suffix} using ${mapping.driver} driver"
+        try {
+            dw = addChildDevice(mapping.namespace ?: 'hubitat', mapping.driver, dni,
+                [
+                    name: "${device} ${suffix}",
+                ]
+            )
+        } catch (UnknownDeviceTypeException e) {
+            if (mapping.namespace == 'component') {
+                log.error "${d.name} driver not found, try downloading from " +
+                          "https://raw.githubusercontent.com/bradsjm/hubitat-drivers/main/Component/${mapping.driver}"
+            } else {
+                log.exception("${d.name} device creation failed", e)
+            }
+        }
+    }
+    
+    dw?.with {
+        updateDataValue 'id', suffix   
+    }
+
+    return dw
+}
+
+void componentRefresh(DeviceWrapper dw) {
+    log.debug "Component refresh: ${dw}"
+    status()
+}
+                    
+void componentOn(DeviceWrapper dw) {
+    componentProcessor(dw, 'on', true)
+}
+
+void componentOff(DeviceWrapper dw) {
+    componentProcessor(dw, 'off', false)
+}
+
+void componentSetLevel(dw, value) {
+    componentProcessor(dw, 'setLevel', value)
+}
+
+void componentProcessor(DeviceWrapper dw, String function, Object value) {
+    endpoint = getChildrenByCategory()[dw.getDataValue('id')]['functions'][function]['endpoint']
+    SetDeviceValue(endpoint, value)   
 }
 
 
@@ -479,8 +583,27 @@ def setAttribute(dpData, val) {
         default:
             data = val
     }
-    if (logDecrypt)log.debug "sendEvent(name: ${eventName}, value : ${data})"
+    if (logDecrypt) log.debug "sendEvent(name: ${eventName}, value : ${data})"
     sendEvent(name: eventName, value : data)
+    childrenDevices = getChildDevices()
+    childrenData = getChildrenByCategory()
+    childrenDevices.each { child -> 
+        if (childrenData[child.getDataValue('id')]['statuses'].contains(eventName)){
+            if (childrenData[child.getDataValue('id')]['remap'][eventName]) {
+                if (logEnable)log.debug "${child} - remapping eventName from ${eventName} to ${childrenData[child.getDataValue('id')]['remap'][eventName]}"
+                eventName = childrenData[child.getDataValue('id')]['remap'][eventName]
+            }
+            
+            if (logEnable)log.debug "child ${child} sendEvent(name: ${eventName}, value : ${data})"
+            child.sendEvent(name: eventName, value: data)
+        }
+        
+        if (eventName == childrenData[child.getDataValue('id')]['switch']) {
+            if (logEnable)log.debug "child ${child} ${eventName} sendEvent(name: switch, value : ${data})"
+            child.sendEvent(name: 'switch', value: data)   
+        }
+        
+    }
     
 }
 
